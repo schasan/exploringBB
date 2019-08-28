@@ -17,6 +17,7 @@
 #include <linux/interrupt.h>            // Required for the IRQ code
 #include <linux/timekeeping.h>		// Measure time between interrupts
 #include <linux/uaccess.h>		// copy_to_user()
+#include <linux/kfifo.h>		// copy_to_user()
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Derek Molloy");
@@ -27,15 +28,18 @@ static unsigned int gpioPulse = 60;    ///< hard coding the button gpio for this
 static unsigned int irqNumber;          ///< Used to share the IRQ number within this file
 static unsigned int numberPulses = 0;  ///< For information, store the number of button presses
 static ktime_t interrupt_time = 0;
-static int ring_read_ptr = 0;
-static int ring_write_ptr = 0;
-#define RING_SIZE 4096
 
-struct {
+typedef struct {
 	int pulse_number;
 	ktime_t interrupt_time;
 	ktime_t interrupt_delta;
-} ring[RING_SIZE];
+} e_fifo;
+
+//#define FIFO_SIZE 4096
+#define FIFO_SIZE 32
+#define PROC_FIFO "timer-elements-fifo"
+static DEFINE_KFIFO(fifo_ring, e_fifo, FIFO_SIZE);
+
 
 /// Function prototype for the custom IRQ handler function -- see below for the implementation
 static irq_handler_t  ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs);
@@ -103,6 +107,8 @@ static void __exit ebbgpio_exit(void){
  */
 static irq_handler_t ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs){
    ktime_t now = ktime_get();
+   e_fifo ring_element, ignore_ring_element;
+   int element_in_count, element_out_count;
 
    //printk(KERN_INFO "GPIO_TEST: Interrupt! (button state is %d)\n", gpio_get_value(gpioPulse));
    if (numberPulses)
@@ -110,11 +116,18 @@ static irq_handler_t ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct 
    else
       printk(KERN_INFO "GPIO_TEST: Interrupt! Pulse number %08d no delta\n", numberPulses);
    
-   ring[ring_write_ptr].pulse_number = numberPulses++;    // Global counter, will be outputted when the module is unloaded
-   ring[ring_write_ptr].interrupt_delta = now-interrupt_time;
-   ring[ring_write_ptr].interrupt_time = now;
-   ring_write_ptr++;
-   ring_write_ptr %= RING_SIZE;
+   ring_element.pulse_number = numberPulses++;    // Global counter, will be outputted when the module is unloaded
+   ring_element.interrupt_delta = now-interrupt_time;
+   ring_element.interrupt_time = now;
+   element_in_count = kfifo_put(&fifo_ring, ring_element);
+   printk(KERN_INFO "GPIO_TEST: Elements pushed into fifo: %d\n", element_in_count);
+   printk(KERN_INFO "GPIO_TEST: Elements available in fifo: %d\n", kfifo_len(&fifo_ring));
+   if (element_in_count == 0) {	// Nothing pushed, fifo is full
+      element_out_count = kfifo_out(&fifo_ring, &ignore_ring_element, 1);
+      element_in_count = kfifo_put(&fifo_ring, ring_element);
+      printk(KERN_INFO "GPIO_TEST: fifo full, deleted %d and pushed %d\n", element_out_count, element_in_count);
+      printk(KERN_INFO "GPIO_TEST: Pulled %08d %12lld\n", ignore_ring_element.pulse_number, ignore_ring_element.interrupt_delta);
+   }
 
    interrupt_time = now;
 
