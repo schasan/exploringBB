@@ -20,9 +20,9 @@
 #include <linux/kfifo.h>		// copy_to_user()
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Derek Molloy");
-MODULE_DESCRIPTION("A Button/LED test driver for the BBB");
-MODULE_VERSION("0.1");
+MODULE_AUTHOR("Mario Schulz");
+MODULE_DESCRIPTION("Interfacing to smartmeter pulses");
+MODULE_VERSION("0.8");
 
 static unsigned int gpioPulse = 60;    ///< hard coding the button gpio for this example to P9_27 (GPIO115)
 static unsigned int irqNumber;          ///< Used to share the IRQ number within this file
@@ -35,8 +35,8 @@ typedef struct {
 	ktime_t interrupt_delta;
 } e_fifo;
 
-//#define FIFO_SIZE 4096
-#define FIFO_SIZE 32
+#define FIFO_SIZE 4096
+//#define FIFO_SIZE 32
 #define PROC_FIFO "timer-elements-fifo"
 static DEFINE_KFIFO(fifo_ring, e_fifo, FIFO_SIZE);
 
@@ -53,7 +53,7 @@ static irq_handler_t  ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct
  */
 static int __init ebbgpio_init(void){
    int result = 0;
-   printk(KERN_INFO "GPIO_TEST: Initializing the GPIO_TEST LKM\n");
+   printk(KERN_INFO "GPIO_TEST: Initializing the GPIO_TEST LKM size struct: %d\n", sizeof(e_fifo));
    // Is the GPIO a valid GPIO number (e.g., the BBB has 4x32 but not all available)
    gpio_request(gpioPulse, "sysfs");       // Set up the gpioPulse
    gpio_direction_input(gpioPulse);        // Set the button GPIO to be an input
@@ -138,16 +138,27 @@ static const char    g_s_Hello_World_string[] = "Hello world from kernel mode!\n
 static const ssize_t g_s_Hello_World_size = sizeof(g_s_Hello_World_string);
 
 /*===============================================================================================*/
-static ssize_t device_file_read(struct file *file_ptr, char __user *user_buffer, size_t count, loff_t *possition)
+static ssize_t device_file_read(struct file *file_ptr, char __user *user_buffer, size_t count, loff_t *position)
 {
-   printk( KERN_NOTICE "Simple-driver: Device file is read at offset = %i, read bytes count = %u", (int)*possition, (unsigned int)count );
+   size_t ret_count = 0;
+   int ret;
 
-   if (*possition >= g_s_Hello_World_size) return 0;
-   if (*possition + count > g_s_Hello_World_size) count = g_s_Hello_World_size - *possition;
-   if (copy_to_user(user_buffer, g_s_Hello_World_string + *possition, count) != 0) return -EFAULT;
+   /*
+   if (*position >= g_s_Hello_World_size) return 0;
+   if (*position + count > g_s_Hello_World_size) count = g_s_Hello_World_size - *position;
+   if (copy_to_user(user_buffer, g_s_Hello_World_string + *position, count) != 0) return -EFAULT;
 
-   *possition += count;
-   return count;
+   *position += count;
+   */
+   if (kfifo_len(&fifo_ring) > 0) {
+      ret = kfifo_to_user(&fifo_ring, user_buffer, count, &ret_count);
+      *position += ret_count;
+
+      printk(KERN_NOTICE "GPIO_TEST: read offset: %i - read requested: %u - read count: %u - read ret: %d",
+		      (int)*position, (unsigned int)count, (unsigned int)ret_count, ret);
+   }
+
+   return ret_count;
 }
 
 /*===============================================================================================*/
@@ -158,23 +169,23 @@ static struct file_operations simple_driver_fops =
 };
 
 static int device_file_major_number = 0;
-static const char device_name[] = "Simple-driver";
+static const char device_name[] = "GPIO_TEST";
 
 /*===============================================================================================*/
 int register_device(void)
 {
    int result = 0;
 
-   printk( KERN_NOTICE "Simple-driver: register_device() is called." );
+   printk(KERN_NOTICE "GPIO_TEST: register_device() is called." );
 
    result = register_chrdev(0, device_name, &simple_driver_fops);
    if (result < 0) {
-     printk(KERN_WARNING "Simple-driver:  can\'t register character device with errorcode = %i", result);
+     printk(KERN_WARNING "GPIO_TEST:  can\'t register character device with errorcode = %i", result);
      return result;
    }
 
    device_file_major_number = result;
-   printk(KERN_NOTICE "Simple-driver: registered character device with major number = %i and minor numbers 0...255", device_file_major_number);
+   printk(KERN_NOTICE "GPIO_TEST: registered character device with major number = %i and minor numbers 0...255", device_file_major_number);
 
    return 0;
 }
@@ -182,7 +193,7 @@ int register_device(void)
 /*-----------------------------------------------------------------------------------------------*/
 void unregister_device(void)
 {
-   printk(KERN_NOTICE "Simple-driver: unregister_device() is called");
+   printk(KERN_NOTICE "GPIO_TEST: unregister_device() is called");
    if (device_file_major_number != 0) unregister_chrdev(device_file_major_number, device_name);
 }
 //
