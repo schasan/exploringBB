@@ -39,7 +39,5 @@ int main()
 		printf("%lld %lld %lld\n", (element_ptr+i)->pulse_number, (element_ptr+i)->interrupt_time, (element_ptr+i)->interrupt_delta);
 	}
 
-	printf("\n");
-
 	return 0;
 }

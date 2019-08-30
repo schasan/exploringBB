@@ -9,7 +9,7 @@
  * @see http://www.derekmolloy.ie/
 */
 
-#include "gpio_test.h"
+#include "metering.h"
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -54,7 +54,7 @@ static irq_handler_t  ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct
  */
 static int __init ebbgpio_init(void){
    int result = 0;
-   printk(KERN_INFO "GPIO_TEST: Initializing the GPIO_TEST LKM size struct: %d\n", sizeof(e_fifo));
+   printk(KERN_INFO "METERING: Initializing the METERING LKM size struct: %d\n", sizeof(e_fifo));
    // Is the GPIO a valid GPIO number (e.g., the BBB has 4x32 but not all available)
    gpio_request(gpioPulse, "sysfs");       // Set up the gpioPulse
    gpio_direction_input(gpioPulse);        // Set the button GPIO to be an input
@@ -62,11 +62,11 @@ static int __init ebbgpio_init(void){
    gpio_export(gpioPulse, false);          // Causes gpio115 to appear in /sys/class/gpio
 			                    // the bool argument prevents the direction from being changed
    // Perform a quick test to see that the button is working as expected on LKM load
-   printk(KERN_INFO "GPIO_TEST: The button state is currently: %d\n", gpio_get_value(gpioPulse));
+   printk(KERN_INFO "METERING: The button state is currently: %d\n", gpio_get_value(gpioPulse));
 
    // GPIO numbers and IRQ numbers are not the same! This function performs the mapping for us
    irqNumber = gpio_to_irq(gpioPulse);
-   printk(KERN_INFO "GPIO_TEST: The button is mapped to IRQ: %d\n", irqNumber);
+   printk(KERN_INFO "METERING: The button is mapped to IRQ: %d\n", irqNumber);
 
    // This next call requests an interrupt line
    result = request_irq(irqNumber,             // The interrupt number requested
@@ -75,10 +75,10 @@ static int __init ebbgpio_init(void){
                         "ebb_gpio_handler",    // Used in /proc/interrupts to identify the owner
                         NULL);                 // The *dev_id for shared interrupt lines, NULL is okay
 
-   printk(KERN_INFO "GPIO_TEST: The interrupt request result is: %d\n", result);
+   printk(KERN_INFO "METERING: The interrupt request result is: %d\n", result);
    
    result = register_device();
-   printk(KERN_INFO "GPIO_TEST: The device register request result is: %d\n", result);
+   printk(KERN_INFO "METERING: The device register request result is: %d\n", result);
    return result;
 }
 
@@ -88,12 +88,12 @@ static int __init ebbgpio_init(void){
  *  GPIOs and display cleanup messages.
  */
 static void __exit ebbgpio_exit(void){
-   printk(KERN_INFO "GPIO_TEST: Interrupts received: %d\n", numberPulses);
+   printk(KERN_INFO "METERING: Interrupts received: %d\n", numberPulses);
    free_irq(irqNumber, NULL);               // Free the IRQ number, no *dev_id required in this case
    gpio_unexport(gpioPulse);               // Unexport the Button GPIO
    gpio_free(gpioPulse);                   // Free the Button GPIO
    unregister_device();
-   printk(KERN_INFO "GPIO_TEST: Goodbye from the LKM!\n");
+   printk(KERN_INFO "METERING: Goodbye from the LKM!\n");
 }
 
 /** @brief The GPIO IRQ Handler function
@@ -113,9 +113,9 @@ static irq_handler_t ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct 
 
 #ifdef DEBUG
    if (numberPulses)
-      printk(KERN_INFO "GPIO_TEST: Interrupt! Pulse number %08d %12lld\n", numberPulses, now-interrupt_time);
+      printk(KERN_INFO "METERING: Interrupt! Pulse number %08d %12lld\n", numberPulses, now-interrupt_time);
    else
-      printk(KERN_INFO "GPIO_TEST: Interrupt! Pulse number %08d no delta\n", numberPulses);
+      printk(KERN_INFO "METERING: Interrupt! Pulse number %08d no delta\n", numberPulses);
 #endif
    
    ring_element.pulse_number = numberPulses++;    // Global counter, will be outputted when the module is unloaded
@@ -125,7 +125,7 @@ static irq_handler_t ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct 
    if (kfifo_is_full(&fifo_ring)) kfifo_skip(&fifo_ring);
    element_in_count = kfifo_put(&fifo_ring, ring_element);
 #ifdef DEBUG
-   printk(KERN_INFO "GPIO_TEST: Elements pushed: %d - available: %d\n", element_in_count, kfifo_len(&fifo_ring));
+   printk(KERN_INFO "METERING: Elements pushed: %d - available: %d\n", element_in_count, kfifo_len(&fifo_ring));
 #endif
 
    interrupt_time = now;
@@ -150,7 +150,7 @@ static ssize_t device_file_read(struct file *file_ptr, char __user *user_buffer,
       *position += ret_count;
 
 #ifdef DEBUG
-      printk(KERN_NOTICE "GPIO_TEST: read offset: %i - read requested: %u - read count: %u - read ret: %d",
+      printk(KERN_NOTICE "METERING: read offset: %i - read requested: %u - read count: %u - read ret: %d",
 		      (int)*position, (unsigned int)count, (unsigned int)ret_count, ret);
 #endif
    }
@@ -166,23 +166,23 @@ static struct file_operations simple_driver_fops =
 };
 
 static int device_file_major_number = 0;
-static const char device_name[] = "GPIO_TEST";
+static const char device_name[] = "METERING";
 
 /*===============================================================================================*/
 int register_device(void)
 {
    int result = 0;
 
-   printk(KERN_NOTICE "GPIO_TEST: register_device() is called." );
+   printk(KERN_NOTICE "METERING: register_device() is called." );
 
    result = register_chrdev(0, device_name, &simple_driver_fops);
    if (result < 0) {
-     printk(KERN_WARNING "GPIO_TEST:  can\'t register character device with errorcode = %i", result);
+     printk(KERN_WARNING "METERING:  can\'t register character device with errorcode = %i", result);
      return result;
    }
 
    device_file_major_number = result;
-   printk(KERN_NOTICE "GPIO_TEST: registered character device with major number = %i and minor numbers 0...255", device_file_major_number);
+   printk(KERN_NOTICE "METERING: registered character device with major number = %i and minor numbers 0...255", device_file_major_number);
 
    return 0;
 }
@@ -190,7 +190,7 @@ int register_device(void)
 /*-----------------------------------------------------------------------------------------------*/
 void unregister_device(void)
 {
-   printk(KERN_NOTICE "GPIO_TEST: unregister_device() is called");
+   printk(KERN_NOTICE "METERING: unregister_device() is called");
    if (device_file_major_number != 0) unregister_chrdev(device_file_major_number, device_name);
 }
 //
