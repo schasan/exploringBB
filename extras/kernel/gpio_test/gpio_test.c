@@ -39,6 +39,7 @@ typedef struct {
 //#define FIFO_SIZE 32
 #define PROC_FIFO "timer-elements-fifo"
 static DEFINE_KFIFO(fifo_ring, e_fifo, FIFO_SIZE);
+static DECLARE_WAIT_QUEUE_HEAD(wq);
 
 
 /// Function prototype for the custom IRQ handler function -- see below for the implementation
@@ -107,29 +108,28 @@ static void __exit ebbgpio_exit(void){
  */
 static irq_handler_t ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs){
    ktime_t now = ktime_get();
-   e_fifo ring_element, ignore_ring_element;
-   int element_in_count, element_out_count;
+   e_fifo ring_element;
+   int element_in_count;
 
-   //printk(KERN_INFO "GPIO_TEST: Interrupt! (button state is %d)\n", gpio_get_value(gpioPulse));
+#ifdef DEBUG
    if (numberPulses)
       printk(KERN_INFO "GPIO_TEST: Interrupt! Pulse number %08d %12lld\n", numberPulses, now-interrupt_time);
    else
       printk(KERN_INFO "GPIO_TEST: Interrupt! Pulse number %08d no delta\n", numberPulses);
+#endif
    
    ring_element.pulse_number = numberPulses++;    // Global counter, will be outputted when the module is unloaded
    ring_element.interrupt_delta = now-interrupt_time;
    ring_element.interrupt_time = now;
+
+   if (kfifo_is_full(&fifo_ring)) kfifo_skip(&fifo_ring);
    element_in_count = kfifo_put(&fifo_ring, ring_element);
-   printk(KERN_INFO "GPIO_TEST: Elements pushed into fifo: %d\n", element_in_count);
-   printk(KERN_INFO "GPIO_TEST: Elements available in fifo: %d\n", kfifo_len(&fifo_ring));
-   if (element_in_count == 0) {	// Nothing pushed, fifo is full
-      element_out_count = kfifo_out(&fifo_ring, &ignore_ring_element, 1);
-      element_in_count = kfifo_put(&fifo_ring, ring_element);
-      printk(KERN_INFO "GPIO_TEST: fifo full, deleted %d and pushed %d\n", element_out_count, element_in_count);
-      printk(KERN_INFO "GPIO_TEST: Pulled %08d %12lld\n", ignore_ring_element.pulse_number, ignore_ring_element.interrupt_delta);
-   }
+#ifdef DEBUG
+   printk(KERN_INFO "GPIO_TEST: Elements pushed: %d - available: %d\n", element_in_count, kfifo_len(&fifo_ring));
+#endif
 
    interrupt_time = now;
+   wake_up_interruptible(&wq);
 
    return (irq_handler_t) IRQ_HANDLED;      // Announce that the IRQ has been handled correctly
 }
@@ -143,19 +143,16 @@ static ssize_t device_file_read(struct file *file_ptr, char __user *user_buffer,
    size_t ret_count = 0;
    int ret;
 
-   /*
-   if (*position >= g_s_Hello_World_size) return 0;
-   if (*position + count > g_s_Hello_World_size) count = g_s_Hello_World_size - *position;
-   if (copy_to_user(user_buffer, g_s_Hello_World_string + *position, count) != 0) return -EFAULT;
+   wait_event_interruptible(wq, kfifo_len(&fifo_ring) != 0);
 
-   *position += count;
-   */
    if (kfifo_len(&fifo_ring) > 0) {
       ret = kfifo_to_user(&fifo_ring, user_buffer, count, &ret_count);
       *position += ret_count;
 
+#ifdef DEBUG
       printk(KERN_NOTICE "GPIO_TEST: read offset: %i - read requested: %u - read count: %u - read ret: %d",
 		      (int)*position, (unsigned int)count, (unsigned int)ret_count, ret);
+#endif
    }
 
    return ret_count;

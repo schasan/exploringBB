@@ -23,7 +23,7 @@ int main()
 
 	element_ptr = (e_fifo *)buffer;
 
-	printf("%d\n", sizeof(e_fifo));
+	//printf("%d\n", sizeof(e_fifo));
 
 	if ((f = open("dev0", O_RDONLY)) < 0) {
 		fprintf(stderr, "Error open\n");
@@ -36,7 +36,6 @@ int main()
 	printf("Bytes read: %d elements read: %d\n", rbytes, elements);
 
 	for (int i=0; i<elements; i++) {
-		//printf("0x%02x ", buffer[i]);
 		printf("%lld %lld %lld\n", (element_ptr+i)->pulse_number, (element_ptr+i)->interrupt_time, (element_ptr+i)->interrupt_delta);
 	}
 
